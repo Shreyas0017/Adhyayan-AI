@@ -776,6 +776,49 @@ Generate a complete academic mind map covering all major areas, theories, method
   }
 });
 
+// Endpoint to get all mind maps for a user (MUST be before /:id route)
+app.get("/api/mindmap/list", verifyToken, checkDbConnection, async (req, res) => {
+  try {
+    console.log("=== /api/mindmap/list called ===");
+    const userId = req.user.uid;
+    console.log("User ID:", userId);
+
+    const mindMaps = await db
+      .collection("mindmaps")
+      .find({ userId })
+      .sort({ lastModified: -1 })
+      .project({
+        title: 1,
+        createdAt: 1,
+        lastModified: 1,
+      })
+      .toArray();
+
+    console.log(`Found ${mindMaps.length} mind maps in database`);
+
+    res.json({
+      success: true,
+      mindMaps: mindMaps.map((map) => {
+        const idString = String(map._id);
+        console.log(`Mind map ID: ${idString}, Type: ${typeof map._id}, Is valid hex: ${/^[0-9a-fA-F]{24}$/.test(idString)}`);
+        return {
+          id: idString,
+          title: map.title,
+          createdAt: map.createdAt,
+          lastModified: map.lastModified,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error("Error retrieving mind maps:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Failed to retrieve mind maps",
+      details: error.message,
+    });
+  }
+});
+
 // Endpoint to get a mind map by ID
 app.get("/api/mindmap/:id", verifyToken, checkDbConnection, async (req, res) => {
   try {
@@ -822,45 +865,6 @@ app.get("/api/mindmap/:id", verifyToken, checkDbConnection, async (req, res) => 
     res.status(500).json({
       success: false,
       error: "Failed to retrieve mind map",
-      details: error.message,
-    });
-  }
-});
-
-// Endpoint to get all mind maps for a user
-app.get("/api/mindmap/list", verifyToken, checkDbConnection, async (req, res) => {
-  try {
-    const userId = req.user.uid;
-
-    const mindMaps = await db
-      .collection("mindmaps")
-      .find({ userId })
-      .sort({ lastModified: -1 })
-      .project({
-        title: 1,
-        createdAt: 1,
-        lastModified: 1,
-      })
-      .toArray();
-
-    res.json({
-      success: true,
-      mindMaps: mindMaps.map((map) => {
-        const idString = String(map._id);
-        console.log(`Mind map ID: ${idString}, Type: ${typeof map._id}, Is valid hex: ${/^[0-9a-fA-F]{24}$/.test(idString)}`);
-        return {
-          id: idString,
-          title: map.title,
-          createdAt: map.createdAt,
-          lastModified: map.lastModified,
-        };
-      }),
-    });
-  } catch (error) {
-    console.error("Error retrieving mind maps:", error.message);
-    res.status(500).json({
-      success: false,
-      error: "Failed to retrieve mind maps",
       details: error.message,
     });
   }

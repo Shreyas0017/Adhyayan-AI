@@ -643,13 +643,11 @@ export default function PreviousMindMaps({ onCreateNew }: PreviousMindMapsProps)
           Refresh
         </Button>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {mindMaps.slice(0, 8).map((mindMap, index) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {mindMaps.slice(0, 4).map((mindMap, index) => (
           <Card 
             key={mindMap.id}
             className="bg-gradient-to-br from-gray-800/40 to-gray-900/40 border border-gray-700/50 hover:border-orange-500/50 backdrop-blur-sm transition-all duration-300 hover:transform hover:scale-[1.02] hover:shadow-xl hover:shadow-orange-500/10 group cursor-pointer animate-mindmap-fade-in"
-            isPressable
-            onPress={() => handleViewMindMap(mindMap.id)}
             style={{
               animationDelay: `${index * 100}ms`
             }}
@@ -707,7 +705,7 @@ export default function PreviousMindMaps({ onCreateNew }: PreviousMindMapsProps)
           </Card>
         ))}
       </div>
-      {mindMaps.length > 8 && (
+      {mindMaps.length > 4 && (
         <div className="mt-6 text-center">
           <Button
             variant="bordered"

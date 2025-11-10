@@ -263,7 +263,10 @@ class ApiService {
     return this.get('/user/gyan-points');
   }  async getMindMaps() {    
     try {
-      return this.get('/mindmap/list');
+      console.log("=== getMindMaps() called ===");
+      const result = await this.get('/mindmap/list');
+      console.log("getMindMaps() response:", JSON.stringify(result, null, 2));
+      return result;
     } catch (error) {
       console.error('Error fetching mind maps:', error);
       return { success: false, error: 'Failed to fetch mind maps', mindMaps: [] };

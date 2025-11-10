@@ -529,14 +529,14 @@ Use the quiz feature to test your understanding and the AI chat to ask specific 
   ];
   return (
     <div className="min-h-screen relative">
-      <WavyBackground className="min-h-screen flex flex-col items-center justify-center p-8 relative">
+      <WavyBackground className="min-h-screen flex flex-col items-center p-8 pt-24 relative">
           {/* Gyan Points Display - Top Right Corner */}
         <div className="fixed top-4 right-4 z-50 md:top-6 md:right-8 lg:right-12">
           <GyanPointsDisplay />
         </div>
         
         {/* Page Header */}
-        <div className="text-center mb-16 z-10">
+        <div className="text-center mb-12 z-10 w-full">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-orange-400 to-red-600 bg-clip-text text-transparent mb-4">
             Mind Map Studio
           </h1>
@@ -544,7 +544,7 @@ Use the quiz feature to test your understanding and the AI chat to ask specific 
             Create and manage your knowledge maps
           </p>
         </div>        {/* Main Action */}
-        <div className="text-center mb-16 z-10">
+        <div className="text-center mb-12 z-10">
           <Button 
             size="lg"
             className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white font-semibold px-8 py-3 transform hover:scale-105 transition-all duration-300 shadow-lg"
@@ -554,7 +554,7 @@ Use the quiz feature to test your understanding and the AI chat to ask specific 
             Create New Mind Map
           </Button>
         </div>        {/* Previous Mind Maps Section */}
-        <div className="w-full max-w-7xl mx-auto px-4 mb-20 z-10">
+        <div className="w-full max-w-7xl mx-auto px-4 pb-32 z-10">
           <PreviousMindMaps key={refreshMindMaps} onCreateNew={onOpen} />
         </div>{/* Floating Dock */}
         <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50">
