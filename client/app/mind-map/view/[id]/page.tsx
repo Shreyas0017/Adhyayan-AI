@@ -260,8 +260,22 @@ const CustomNode = memo(({ data, id }: NodeProps): React.ReactElement => {
         return node;
       });
       
-      // Recursively show/hide all descendants
-      updatedNodes = processAllDescendants(updatedNodes, targetNodeId, !willExpand);
+      if (willExpand) {
+        // EXPANDING: Show only direct children (one level)
+        updatedNodes = updatedNodes.map((node) => {
+          // Show only direct children of the target node
+          if (node.data.parentNode === targetNodeId) {
+            return {
+              ...node,
+              hidden: false
+            };
+          }
+          return node;
+        });
+      } else {
+        // COLLAPSING: Hide all descendants recursively
+        updatedNodes = processAllDescendants(updatedNodes, targetNodeId, true);
+      }
       
       // Calculate space requirements and reposition nodes dynamically
       const repositionedNodes = calculateDynamicPositions(updatedNodes, targetNodeId, willExpand);
@@ -598,12 +612,32 @@ function MindMapContent() {
         return;
       }
 
-      // Determine the new read status
-      const newIsRead = isRead !== undefined ? isRead : !topicsReadStatus[nodeId];
+      // Get current read status - be explicit about it
+      const currentIsRead = topicsReadStatus[nodeId] === true;
       
-      // If user is trying to mark as read (not unread), show quiz first
-      if (newIsRead && !topicsReadStatus[nodeId]) {
-        console.log(`Showing quiz for node ${nodeId} before marking as read`);
+      console.log('=== TOGGLE READ STATUS DEBUG ===');
+      console.log(`Node ID: ${nodeId}`);
+      console.log(`Current isRead from state: ${topicsReadStatus[nodeId]}`);
+      console.log(`Current isRead (boolean): ${currentIsRead}`);
+      console.log(`isRead parameter: ${isRead}`);
+      console.log(`topicsReadStatus:`, topicsReadStatus);
+      
+      // Determine the new read status
+      const newIsRead = isRead !== undefined ? isRead : !currentIsRead;
+      
+      console.log(`New isRead will be: ${newIsRead}`);
+      console.log('================================');
+      
+      // If currently checked and user wants to uncheck, do it directly without quiz
+      if (currentIsRead === true && newIsRead === false) {
+        console.log(`✓ UNCHECKING node ${nodeId} directly (was checked)`);
+        await updateReadStatusDirectly(nodeId, false);
+        return;
+      }
+      
+      // If currently unchecked and user wants to check, show quiz first
+      if (currentIsRead === false && newIsRead === true) {
+        console.log(`✓ SHOWING QUIZ for node ${nodeId} (was unchecked)`);
         
         // Show loading state immediately
         setLoadingQuiz(true);
@@ -653,9 +687,9 @@ function MindMapContent() {
         return;
       }
       
-      // Direct marking (either marking as unread or already passed quiz)
-      // This handles unchecking immediately
-      await updateReadStatusDirectly(nodeId, newIsRead);
+      // This shouldn't be reached if we handled uncheck or check cases above
+      console.warn(`⚠️ Reached fallback case for node ${nodeId} - this might indicate a logic error`);
+      console.warn(`Current: ${currentIsRead}, New: ${newIsRead}`);
       
     } catch (error) {
       console.error('Error in handleToggleReadStatus:', error);
@@ -702,56 +736,129 @@ function MindMapContent() {
       
       console.log(`Updating read status for ${nodeId}: ${newIsRead}`);
       
+      // If unchecking a parent, collect all children to uncheck
+      const nodesToUpdate: Array<{id: string, isRead: boolean}> = [{ id: nodeId, isRead: newIsRead }];
+      
+      // If unchecking, find all children and uncheck them too
+      if (!newIsRead) {
+        const findAllChildren = (parentId: string): string[] => {
+          const children: string[] = [];
+          localMindMapData.forEach(topic => {
+            if (topic.id === parentId) {
+              // Add direct subtopics
+              topic.subtopics.forEach(sub => {
+                children.push(sub.id);
+                // Recursively find nested children if they have subtopics
+                if (sub.subtopics && sub.subtopics.length > 0) {
+                  children.push(...findAllChildren(sub.id));
+                }
+              });
+            } else {
+              // Check in subtopics
+              topic.subtopics.forEach(sub => {
+                if (sub.id === parentId && sub.subtopics) {
+                  sub.subtopics.forEach(nestedSub => {
+                    children.push(nestedSub.id);
+                    if (nestedSub.subtopics && nestedSub.subtopics.length > 0) {
+                      children.push(...findAllChildren(nestedSub.id));
+                    }
+                  });
+                }
+              });
+            }
+          });
+          return children;
+        };
+        
+        const childrenIds = findAllChildren(nodeId);
+        childrenIds.forEach(childId => {
+          nodesToUpdate.push({ id: childId, isRead: false });
+        });
+        
+        if (childrenIds.length > 0) {
+          console.log(`Unchecking ${childrenIds.length} children of ${nodeId}:`, childrenIds);
+        }
+      }
+      
       // Update local state immediately for better UX
       const updatedStatus = {
-        ...topicsReadStatus,
-        [nodeId]: newIsRead
+        ...topicsReadStatus
       };
+      
+      nodesToUpdate.forEach(node => {
+        updatedStatus[node.id] = node.isRead;
+      });
       
       setTopicsReadStatus(updatedStatus);
         // Update local mind map data and check for auto-parent marking
       setLocalMindMapData(prev => {
         const updatedData = prev.map(topic => {
-          if (topic.id === nodeId) {
-            // Direct topic toggle
+          // Helper to update node read status recursively
+          const updateNodeStatus = (node: any): any => {
+            const shouldUpdate = nodesToUpdate.find(n => n.id === node.id);
+            if (shouldUpdate) {
+              return {
+                ...node,
+                isRead: shouldUpdate.isRead,
+                subtopics: node.subtopics ? node.subtopics.map(updateNodeStatus) : []
+              };
+            }
             return {
-              ...topic,
-              isRead: newIsRead
+              ...node,
+              subtopics: node.subtopics ? node.subtopics.map(updateNodeStatus) : []
             };
+          };
+          
+          if (topic.id === nodeId) {
+            // Direct topic toggle - also update all children if unchecking
+            return updateNodeStatus(topic);
           }
           
           // Check if this is a subtopic being toggled
-          const updatedTopic = {
-            ...topic,
-            subtopics: topic.subtopics.map(subtopic => 
-              subtopic.id === nodeId ? {
-                ...subtopic,
-                isRead: newIsRead
-              } : subtopic
-            )
-          };
+          const updatedTopic = updateNodeStatus(topic);
           
-          // Auto-mark parent as read if all subtopics are read
-          if (topic.subtopics.some(sub => sub.id === nodeId) && newIsRead) {
-            const allSubtopicsRead = updatedTopic.subtopics.every(sub => 
-              sub.id === nodeId ? newIsRead : updatedStatus[sub.id]
-            );
-            
-            if (allSubtopicsRead && topic.subtopics.length > 0) {
-              console.log(`Auto-marking parent topic ${topic.id} as read - all subtopics completed`);
-              updatedStatus[topic.id] = true;
-              setTopicsReadStatus(updatedStatus);
+          // Handle parent topic auto-marking based on subtopic status
+          if (topic.subtopics.some(sub => sub.id === nodeId)) {
+            if (newIsRead) {
+              // Auto-mark parent as read if all subtopics are read
+              const allSubtopicsRead = updatedTopic.subtopics.every((sub: any) => 
+                sub.id === nodeId ? newIsRead : updatedStatus[sub.id]
+              );
               
-              // Also update in backend
-              setTimeout(() => {
-                apiService.updateNodeReadStatus(mindMapId, topic.id, true)
-                  .catch((error: any) => console.error('Error auto-updating parent read status:', error));
-              }, 100);
-              
-              return {
-                ...updatedTopic,
-                isRead: true
-              };
+              if (allSubtopicsRead && topic.subtopics.length > 0) {
+                console.log(`Auto-marking parent topic ${topic.id} as read - all subtopics completed`);
+                updatedStatus[topic.id] = true;
+                setTopicsReadStatus(updatedStatus);
+                
+                // Also update in backend
+                setTimeout(() => {
+                  apiService.updateNodeReadStatus(mindMapId, topic.id, true)
+                    .catch((error: any) => console.error('Error auto-updating parent read status:', error));
+                }, 100);
+                
+                return {
+                  ...updatedTopic,
+                  isRead: true
+                };
+              }
+            } else {
+              // Auto-unmark parent if any subtopic is unchecked
+              if (topic.isRead) {
+                console.log(`Auto-unmarking parent topic ${topic.id} - subtopic ${nodeId} unchecked`);
+                updatedStatus[topic.id] = false;
+                setTopicsReadStatus(updatedStatus);
+                
+                // Also update in backend
+                setTimeout(() => {
+                  apiService.updateNodeReadStatus(mindMapId, topic.id, false)
+                    .catch((error: any) => console.error('Error auto-updating parent read status:', error));
+                }, 100);
+                
+                return {
+                  ...updatedTopic,
+                  isRead: false
+                };
+              }
             }
           }
           
@@ -761,17 +868,27 @@ function MindMapContent() {
         return updatedData;
       });
 
-      // Persist to backend
+      // Persist to backend - update all affected nodes
       try {
-        await apiService.updateNodeReadStatus(mindMapId, nodeId, newIsRead);
-        console.log(`Successfully updated read status for ${nodeId}`);
+        // Update all nodes in parallel
+        const updatePromises = nodesToUpdate.map(node => 
+          apiService.updateNodeReadStatus(mindMapId, node.id, node.isRead)
+            .then(() => console.log(`Successfully updated read status for ${node.id} to ${node.isRead}`))
+            .catch((error: any) => console.error(`Error updating read status for ${node.id}:`, error))
+        );
+        
+        await Promise.all(updatePromises);
+        console.log(`Successfully updated read status for ${nodesToUpdate.length} node(s)`);
       } catch (error) {
         console.error('Error updating read status:', error);
-        // Revert local state on error
-        setTopicsReadStatus(prev => ({
-          ...prev,
-          [nodeId]: !newIsRead
-        }));
+        // Revert local state on error for all affected nodes
+        setTopicsReadStatus(prev => {
+          const reverted = { ...prev };
+          nodesToUpdate.forEach(node => {
+            reverted[node.id] = !node.isRead;
+          });
+          return reverted;
+        });
         setLocalMindMapData(prev => prev.map(topic => {
           if (topic.id === nodeId) {
             return {
@@ -793,7 +910,7 @@ function MindMapContent() {
     } catch (error) {
       console.error('Error in updateReadStatusDirectly:', error);
     }
-  }, [topicsReadStatus, params?.id, setLocalMindMapData]);
+  }, [topicsReadStatus, params?.id, setLocalMindMapData, localMindMapData]);
 
   // Handle quiz completion
   const handleQuizSuccess = useCallback(async () => {
@@ -816,23 +933,26 @@ function MindMapContent() {
       const mindMapId = params?.id as string;
       if (!mindMapId) return;
       
+      console.log('Loading read status from backend for mind map:', mindMapId);
       const response = await apiService.getNodeReadStatus(mindMapId);
+      
       if (response.success && response.nodeReadStatus) {
-        // Update local state
-        setTopicsReadStatus(prev => ({
-          ...prev,
-          ...response.nodeReadStatus
-        }));
+        console.log('Read status loaded from backend:', response.nodeReadStatus);
         
-        // Update local mind map data
-        setLocalMindMapData(prev => prev.map(topic => ({
-          ...topic,
-          isRead: response.nodeReadStatus[topic.id] || false,
-          subtopics: topic.subtopics.map(subtopic => ({
-            ...subtopic,
-            isRead: response.nodeReadStatus[subtopic.id] || false
-          }))
-        })));
+        // IMPORTANT: Replace the state completely with backend data (single source of truth)
+        setTopicsReadStatus(response.nodeReadStatus);
+        
+        // Update local mind map data recursively
+        const updateNodeReadStatus = (node: any): any => ({
+          ...node,
+          isRead: response.nodeReadStatus[node.id] || false,
+          subtopics: node.subtopics ? node.subtopics.map(updateNodeReadStatus) : []
+        });
+        
+        setLocalMindMapData(prev => prev.map(updateNodeReadStatus));
+        console.log('Local state synchronized with backend');
+      } else {
+        console.log('No read status found in backend, using default (all unchecked)');
       }
     } catch (error) {
       console.error('Error loading read status:', error);
