@@ -340,12 +340,12 @@ export function generateFallbackMindMapData(): BackendData {
       }
     ],
     edges: [
-      { id: "central-light_reactions", source: "central", target: "light_reactions", type: "bezier" },
-      { id: "central-dark_reactions", source: "central", target: "dark_reactions", type: "bezier" },
-      { id: "central-factors", source: "central", target: "factors", type: "bezier" },
-      { id: "factors-light", source: "factors", target: "light", type: "bezier" },
-      { id: "factors-temperature", source: "factors", target: "temperature", type: "bezier" },
-      { id: "factors-co2", source: "factors", target: "co2", type: "bezier" }
+      { id: "central-light_reactions", source: "central", target: "light_reactions", type: "default" },
+      { id: "central-dark_reactions", source: "central", target: "dark_reactions", type: "default" },
+      { id: "central-factors", source: "central", target: "factors", type: "default" },
+      { id: "factors-light", source: "factors", target: "light", type: "default" },
+      { id: "factors-temperature", source: "factors", target: "temperature", type: "default" },
+      { id: "factors-co2", source: "factors", target: "co2", type: "default" }
     ]
   };
 }
