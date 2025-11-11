@@ -28,7 +28,9 @@ import {
   Position,
   NodeToolbar,
   useReactFlow,
-  ReactFlowProvider
+  ReactFlowProvider,
+  applyNodeChanges,
+  NodeChange
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
@@ -57,6 +59,7 @@ type CustomNodeData = {
   parentNode?: string;
   isSelected?: boolean;
   isExpanding?: boolean;
+  isLoadingQuiz?: boolean; // Loading state for quiz generation
   canExpand?: boolean; // For leaf nodes that can be expanded with AI
   onToggleReadStatus?: (nodeId: string) => void;
   onNodeClick?: (nodeId: string) => void;
@@ -65,10 +68,10 @@ type CustomNodeData = {
 
 // Utility function to calculate dynamic node positions to prevent overlaps
 const calculateDynamicPositions = (nodes: Node[], changedNodeId: string, isExpanding: boolean) => {
-  const NODE_HEIGHT = 60; // Approximate height of a node including margins
-  const VERTICAL_SPACING = 20; // Extra spacing between nodes
-  const CHILD_HORIZONTAL_OFFSET = 300; // Horizontal spacing for child nodes
-  const MIN_SPACING_BETWEEN_GROUPS = 40; // Minimum space between different node groups
+  const NODE_HEIGHT = 140; // Updated height to account for new node design
+  const VERTICAL_SPACING = 40; // Increased spacing between nodes
+  const CHILD_HORIZONTAL_OFFSET = 350; // Horizontal spacing for child nodes
+  const MIN_SPACING_BETWEEN_GROUPS = 60; // Minimum space between different node groups
   
   // Create a copy of nodes array to modify
   const repositionedNodes = [...nodes];
@@ -188,6 +191,53 @@ const CustomNode = memo(({ data, id }: NodeProps): React.ReactElement => {
   const { setNodes, getNodes, setCenter, getZoom } = useReactFlow();
   const nodeData = data as CustomNodeData;
   
+  // Helper function to recursively hide all descendants
+  const hideDescendants = (nodes: Node[], parentId: string): Node[] => {
+    return nodes.map(node => {
+      // If this node is a child of the parent, hide it and its descendants
+      if (node.data.parentNode === parentId) {
+        // Also collapse this node if it was expanded
+        const updatedNode = {
+          ...node,
+          hidden: true,
+          data: { ...node.data, expanded: false }
+        };
+        return updatedNode;
+      }
+      return node;
+    });
+  };
+
+  // Helper function to recursively process all descendants
+  const processAllDescendants = (nodes: Node[], parentId: string, shouldHide: boolean): Node[] => {
+    let result = [...nodes];
+    
+    // Find all direct children
+    const childIds = result
+      .filter(n => n.data.parentNode === parentId)
+      .map(n => n.id);
+    
+    // Process each child
+    childIds.forEach(childId => {
+      // Update the child
+      result = result.map(node => {
+        if (node.id === childId) {
+          return {
+            ...node,
+            hidden: shouldHide,
+            data: { ...node.data, expanded: shouldHide ? false : node.data.expanded }
+          };
+        }
+        return node;
+      });
+      
+      // Recursively process this child's descendants
+      result = processAllDescendants(result, childId, shouldHide);
+    });
+    
+    return result;
+  };
+
   // Function to handle expand/collapse with dynamic repositioning
   const toggleExpanded = useCallback(() => {
     const targetNodeId = id;
@@ -199,25 +249,19 @@ const CustomNode = memo(({ data, id }: NodeProps): React.ReactElement => {
       const wasExpanded = targetNode.data.expanded;
       const willExpand = !wasExpanded;
       
-      // First, toggle the expanded state and show/hide child nodes
-      const updatedNodes = nds.map((node) => {
-        // Toggle the expanded state of clicked node
+      // Toggle the expanded state of clicked node
+      let updatedNodes = nds.map((node) => {
         if (node.id === targetNodeId) {
           return {
             ...node,
             data: { ...node.data, expanded: willExpand }
           };
         }
-        
-        // Show/hide child nodes based on parent's expanded state
-        if (node.data.parentNode === targetNodeId) {
-          return {
-            ...node,
-            hidden: !willExpand,
-          };
-        }
         return node;
       });
+      
+      // Recursively show/hide all descendants
+      updatedNodes = processAllDescendants(updatedNodes, targetNodeId, !willExpand);
       
       // Calculate space requirements and reposition nodes dynamically
       const repositionedNodes = calculateDynamicPositions(updatedNodes, targetNodeId, willExpand);
@@ -269,15 +313,15 @@ const CustomNode = memo(({ data, id }: NodeProps): React.ReactElement => {
   }, [nodeData, id]);
     // Determine border color based on read status and selection
   const getBorderColor = () => {
-    if (nodeData.isSelected) return "border-white border-2"; // White border for selected nodes
-    if (nodeData.isRoot) return "border-blue-500";
-    return nodeData.isRead ? "border-green-500" : "border-neutral-700";
+    if (nodeData.isSelected) return "border-white"; // White border for selected nodes
+    if (nodeData.isRoot) return "border-neutral-500";
+    return nodeData.isRead ? "border-green-900" : "border-neutral-500";
   };
   
   // Determine background color
   const getBackgroundColor = () => {
-    if (nodeData.isRoot) return "bg-neutral-900";
-    return nodeData.isRead ? "bg-green-700" : "bg-neutral-900";
+    // All nodes use the same dark background color
+    return "bg-neutral-900/80";
   };  // Function to handle node expansion for leaf nodes
   const handleExpandNode = useCallback(async () => {
     if (nodeData.onExpandNode) {
@@ -286,88 +330,132 @@ const CustomNode = memo(({ data, id }: NodeProps): React.ReactElement => {
   }, [nodeData, id]);
 
   return (
-    <>
-      {/* Expandable button for nodes with children */}
-      {(data as CustomNodeData).hasChildren && (
+    <div className="relative" style={{ willChange: 'transform' }}>
+      {/* Connection points - positioned for center origin node */}
+      <Handle 
+        type="target" 
+        position={Position.Left} 
+        className="!w-0 !h-0 !border-0 !bg-transparent !min-w-0 !min-h-0"
+        style={{ opacity: 0 }}
+        isConnectable={true}
+      />
+      <Handle 
+        type="source" 
+        position={Position.Right} 
+        className="!w-0 !h-0 !border-0 !bg-transparent !min-w-0 !min-h-0"
+        style={{ opacity: 0 }}
+        isConnectable={true}
+      />
+
+      {/* Read status indicator/toggle button for non-root nodes - positioned at TOP-LEFT */}
+      {!nodeData.isRoot && (
         <div 
-          className="nodrag absolute -left-6 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-neutral-800 flex items-center justify-center cursor-pointer hover:bg-neutral-700 transition-colors"
-          onClick={toggleExpanded}
-          style={{ zIndex: 10, pointerEvents: 'all' }}
-          title={(data as CustomNodeData).expanded ? "Collapse" : "Expand"}
-        >
-          {(data as CustomNodeData).expanded ? (
-            <IconMinus className="h-3 w-3 text-white" />
-          ) : (
-            <IconPlus className="h-3 w-3 text-white" />
+          className={cn(
+            "nodrag absolute top-4 left-4 w-6 h-6 rounded-full flex items-center justify-center cursor-pointer border-2 z-10",
+            nodeData.isLoadingQuiz 
+              ? "bg-orange-600 border-orange-500"
+              : nodeData.isRead 
+                ? "bg-green-900 border-green-800" 
+                : "bg-transparent border-neutral-400 hover:border-neutral-300"
           )}
+          onClick={(e) => {
+            e.stopPropagation(); // Prevent triggering other node events
+            if (!nodeData.isLoadingQuiz) { // Prevent double clicks while loading
+              toggleReadStatus();
+            }
+          }}
+          title={nodeData.isLoadingQuiz ? "Loading quiz..." : nodeData.isRead ? "Mark as unread" : "Mark as read"}
+          style={{ pointerEvents: 'all' }}
+        >
+          {nodeData.isLoadingQuiz ? (
+            <IconLoader2 className="w-3.5 h-3.5 text-white animate-spin" strokeWidth={3} />
+          ) : nodeData.isRead ? (
+            <IconCheck className="w-3.5 h-3.5 text-white font-bold" strokeWidth={3} />
+          ) : null}
         </div>
       )}
 
-      {/* Expand button for leaf nodes (AI expansion) */}
-      {!(data as CustomNodeData).hasChildren && (data as CustomNodeData).canExpand && !nodeData.isRoot && (
-        <div 
-          className="nodrag absolute -right-6 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-orange-600 hover:bg-orange-500 flex items-center justify-center cursor-pointer transition-colors"
-          onClick={handleExpandNode}
-          style={{ zIndex: 10, pointerEvents: 'all' }}
-          title="Deep dive into this topic (AI expansion)"
-        >
-          {(data as CustomNodeData).isExpanding ? (
-            <IconLoader2 className="h-3 w-3 text-white animate-spin" />
-          ) : (
-            <IconPlus className="h-3 w-3 text-white" />
-          )}
-        </div>
-      )}
-
-      {/* Main node container */}
+      {/* Main node container with horizontal separator */}
       <div 
         className={cn(
-          "px-4 py-2 min-w-32 rounded-md flex items-center justify-center border",
+          "min-w-[280px] rounded-[24px] border-[3px] relative overflow-hidden",
           getBorderColor(),
-          getBackgroundColor(),
-          nodeData.isRoot ? "font-semibold" : "font-normal"
+          getBackgroundColor()
         )}
         onClick={handleNodeClick}
-        style={{ cursor: 'grab', userSelect: 'none' }}
+        style={{ 
+          cursor: 'grab', 
+          userSelect: 'none',
+          transform: 'translateZ(0)',
+          backfaceVisibility: 'hidden'
+        }}
       >
-        {/* Connection points - inside the main node */}
-        <Handle 
-          type="target" 
-          position={Position.Left} 
-          className="w-1 h-1 border-0 bg-transparent" 
-          style={{ opacity: 0 }}
-        />
-        <Handle 
-          type="source" 
-          position={Position.Right} 
-          className="w-1 h-1 border-0 bg-transparent" 
-          style={{ opacity: 0 }}
-        />
-
-        {/* Read status indicator/toggle button for non-root nodes - more subtle design */}
-        {!nodeData.isRoot && (
-          <div 
-            className={cn(
-              "nodrag absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/4 w-3 h-3 rounded-full flex items-center justify-center cursor-pointer",
-              nodeData.isRead ? "bg-green-500" : "bg-neutral-700",
-              "hover:opacity-80 transition-opacity border border-black"
+        {/* Top section with circle and chevron/expand button */}
+        <div className="px-6 py-4 flex items-center justify-between min-h-[60px]">
+          {/* Empty space for circle on left - reserves space for consistent layout */}
+          <div className="w-6 flex-shrink-0">
+            {/* Circle is positioned absolutely for non-root nodes, this reserves space */}
+          </div>
+          
+          {/* Right side chevron/button */}
+          <div className="ml-auto flex-shrink-0">
+            {/* Expand/Collapse indicator for nodes with children */}
+            {(data as CustomNodeData).hasChildren && (
+              <div 
+                className="nodrag flex items-center justify-center cursor-pointer bg-neutral-700 rounded-full w-7 h-7 hover:bg-neutral-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpanded();
+                }}
+                style={{ pointerEvents: 'all' }}
+                title={(data as CustomNodeData).expanded ? "Collapse" : "Expand"}
+              >
+                {(data as CustomNodeData).expanded ? (
+                  <IconChevronRight className="h-4 w-4 text-white rotate-90" />
+                ) : (
+                  <IconChevronRight className="h-4 w-4 text-white" />
+                )}
+              </div>
             )}
-            onClick={(e) => {
-              e.stopPropagation(); // Prevent triggering other node events
-              toggleReadStatus();
-            }}
-            title={nodeData.isRead ? "Mark as unread" : "Mark as read"}
-            style={{ zIndex: 5, pointerEvents: 'all' }}
-          >
-            {nodeData.isRead && (
-              <div className="h-1.5 w-1.5 bg-white rounded-full"></div>
+
+            {/* Expand button for leaf nodes (AI expansion) */}
+            {!(data as CustomNodeData).hasChildren && (data as CustomNodeData).canExpand && !nodeData.isRoot && (
+              <div 
+                className="nodrag flex items-center justify-center cursor-pointer bg-orange-600 rounded-full w-7 h-7 hover:bg-orange-500"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleExpandNode();
+                }}
+                style={{ pointerEvents: 'all' }}
+                title="Expand this topic"
+              >
+                {(data as CustomNodeData).isExpanding ? (
+                  <IconLoader2 className="h-4 w-4 text-white animate-spin" />
+                ) : (
+                  <IconChevronRight className="h-4 w-4 text-white" />
+                )}
+              </div>
             )}
           </div>
-        )}
-        
-        <div className="text-sm text-white" style={{ pointerEvents: 'none' }}>{nodeData.label}</div>
+        </div>
+
+        {/* Horizontal separator line */}
+        <div className="h-[1px] bg-neutral-600 mx-4"></div>
+
+        {/* Bottom section with node label */}
+        <div className="px-6 py-5">
+          <div 
+            className={cn(
+              "text-white text-center",
+              nodeData.isRoot ? "font-semibold text-base" : "font-medium text-sm"
+            )}
+            style={{ pointerEvents: 'none' }}
+          >
+            {nodeData.label}
+          </div>
+        </div>
       </div>
-    </>
+    </div>
   );
 });
 
@@ -517,6 +605,10 @@ function MindMapContent() {
       if (newIsRead && !topicsReadStatus[nodeId]) {
         console.log(`Showing quiz for node ${nodeId} before marking as read`);
         
+        // Show loading state immediately
+        setLoadingQuiz(true);
+        setPendingReadNode(nodeId);
+        
         // Check if we have a description for this node to generate quiz
         const nodeDescription = nodeDescriptions[nodeId];
         if (!nodeDescription) {
@@ -547,6 +639,8 @@ function MindMapContent() {
             }
           } catch (descError) {
             console.error('Error fetching node description for quiz:', descError);
+            setLoadingQuiz(false);
+            setPendingReadNode(null);
           }
           
           // If we still don't have description, use a generic one
@@ -560,36 +654,40 @@ function MindMapContent() {
       }
       
       // Direct marking (either marking as unread or already passed quiz)
+      // This handles unchecking immediately
       await updateReadStatusDirectly(nodeId, newIsRead);
       
     } catch (error) {
       console.error('Error in handleToggleReadStatus:', error);
+      setLoadingQuiz(false);
+      setPendingReadNode(null);
     }
   }, [topicsReadStatus, params?.id, nodeDescriptions, getNodes]);
 
   // Function to generate and show quiz
   const generateAndShowQuiz = useCallback(async (nodeId: string, description: string) => {
     try {
-      setLoadingQuiz(true);
-      setPendingReadNode(nodeId);
-      
+      // Loading state is already set in handleToggleReadStatus
       console.log(`Generating quiz for node: ${nodeId}`);
       const response = await apiService.getMindMapNodeQuiz(nodeId, description);
       
       if (response?.success && response.quiz && response.quiz.questions) {
         setQuizQuestions(response.quiz.questions);
-        setShowQuizModal(true);
+        setLoadingQuiz(false); // Stop loading before showing modal
+        setShowQuizModal(true); // Show modal immediately after questions are ready
       } else {
         console.error('Failed to generate quiz:', response?.error);
+        setLoadingQuiz(false);
+        setPendingReadNode(null);
         // Fallback: mark as read without quiz
         await updateReadStatusDirectly(nodeId, true);
       }
     } catch (error) {
       console.error('Error generating quiz:', error);
+      setLoadingQuiz(false);
+      setPendingReadNode(null);
       // Fallback: mark as read without quiz
       await updateReadStatusDirectly(nodeId, true);
-    } finally {
-      setLoadingQuiz(false);
     }
   }, []);
 
@@ -806,11 +904,15 @@ function MindMapContent() {
                   id: edge.id || `${edge.source}-${edge.target}`,
                   source: edge.source,
                   target: edge.target,
-                  type: 'bezier',
+                  type: 'default',
                   animated: false,
-                  style: { strokeWidth: 1, stroke: '#333' },
-                  markerEnd: undefined,
-                  markerStart: undefined,
+                  style: { strokeWidth: 1.5, stroke: '#888' },
+                  markerEnd: {
+                    type: MarkerType.ArrowClosed,
+                    width: 12,
+                    height: 12,
+                    color: '#888',
+                  },
                   data: { curvature: 0.8 }
                 }));
                 
@@ -948,12 +1050,19 @@ function MindMapContent() {
           id: edge.id || `${edge.source}-${edge.target}`,
           source: edge.source,
           target: edge.target,
-          type: 'bezier',
+          type: 'default',
           animated: false,
-          style: { strokeWidth: 1, stroke: '#333' },
-          markerEnd: undefined,
-          markerStart: undefined,
-          data: { curvature: 0.25 }
+          style: { 
+            strokeWidth: 1.5, 
+            stroke: '#888',
+            strokeLinecap: 'round'
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 15,
+            height: 15,
+            color: '#888',
+          },
         }));
         
         setEdges(reactFlowEdges);
@@ -1774,7 +1883,7 @@ More detailed content will be available soon with comprehensive explanations, eq
 
     // Calculate positions for main topic nodes
     const mainTopicsCount = mindMapData.length;
-    const mainTopicYStep = 100;
+    const mainTopicYStep = 180; // Increased spacing between main topics
     const mainTopicStartY = 200 - ((mainTopicsCount - 1) * mainTopicYStep) / 2;
     
     // Create main topic nodes from mindMapData (first level)
@@ -1801,7 +1910,7 @@ More detailed content will be available soon with comprehensive explanations, eq
       // Add subtopic nodes for this topic
       if (topic.subtopics.length > 0) {
         const subtopicsCount = topic.subtopics.length;
-        const subtopicYStep = 50;
+        const subtopicYStep = 180; // Increased spacing between subtopics
         const subtopicStartY = yPos - ((subtopicsCount - 1) * subtopicYStep) / 2;
         
         topic.subtopics.forEach((subtopic, subtopicIndex) => {
@@ -1841,30 +1950,36 @@ More detailed content will be available soon with comprehensive explanations, eq
       flowEdges.push({        id: `central-${topic.id}`,
         source: 'central',
         target: topic.id,
-        type: 'bezier',
+        type: 'default',
         animated: false,
         style: { 
-          stroke: '#333', 
-          strokeWidth: 1,
+          stroke: '#888', 
+          strokeWidth: 1.5,
         },
-        markerEnd: undefined, // Remove endpoint markers
-        markerStart: undefined, // Remove startpoint markers
-        data: { curvature: 0.25 }
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 12,
+          height: 12,
+          color: '#888',
+        },
       });
         // Create edges from topics to their subtopics
       topic.subtopics.forEach(subtopic => {
         flowEdges.push({          id: `${topic.id}-${subtopic.id}`,
           source: topic.id,
           target: subtopic.id,
-          type: 'bezier',
+          type: 'default',
           animated: false,
           style: { 
-            stroke: '#333', 
-            strokeWidth: 1,
+            stroke: '#888', 
+            strokeWidth: 1.5,
           },
-          markerEnd: undefined, // Remove endpoint markers
-          markerStart: undefined, // Remove startpoint markers
-          data: { curvature: 0.25 }
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 12,
+            height: 12,
+            color: '#888',
+          },
         });
       });
     });    return flowEdges;
@@ -1875,15 +1990,24 @@ More detailed content will be available soon with comprehensive explanations, eq
 
   // Memoize ReactFlow props to prevent re-renders
   const defaultEdgeOptions = useMemo(() => ({
-    type: 'bezier',
+    type: 'default',
     animated: false,
-    style: { strokeWidth: 1, stroke: '#333' },
-    markerEnd: undefined,
-    markerStart: undefined,
-    data: { curvature: 0.25 }
+    style: { 
+      strokeWidth: 1.5, 
+      stroke: '#888',
+    },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 12,
+      height: 12,
+      color: '#888',
+    },
   }), []);
 
-  const connectionLineStyle = useMemo(() => ({ stroke: '#333', strokeWidth: 2 }), []);
+  const connectionLineStyle = useMemo(() => ({ 
+    stroke: '#888', 
+    strokeWidth: 1.5,
+  }), []);
   const defaultViewport = useMemo(() => ({ x: 0, y: 0, zoom: 0.8 }), []);
 
   // Function to handle AI expansion of leaf nodes (defined BEFORE useEffect that uses it)
@@ -1944,8 +2068,8 @@ More detailed content will be available soon with comprehensive explanations, eq
           id: subNode.id,
           type: 'customNode',
           position: { 
-            x: parentPosition.x + 300, 
-            y: parentPosition.y + (index * 80) // Temporary positioning
+            x: parentPosition.x + 350, 
+            y: parentPosition.y + (index * 180) - ((response.expandedNodes.length - 1) * 90) // Better vertical distribution
           },
           data: {
             label: subNode.title,
@@ -1971,15 +2095,18 @@ More detailed content will be available soon with comprehensive explanations, eq
           id: `${nodeId}-${subNode.id}`,
           source: nodeId,
           target: subNode.id,
-          type: 'bezier',
+          type: 'default',
           animated: false,
           style: { 
-            stroke: '#333', 
-            strokeWidth: 1,
+            stroke: '#888', 
+            strokeWidth: 1.5,
           },
-          markerEnd: undefined,
-          markerStart: undefined,
-          data: { curvature: 0.25 }
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 12,
+            height: 12,
+            color: '#888',
+          },
         }));
 
         // Add new nodes and edges to the graph with dynamic positioning
@@ -2118,40 +2245,130 @@ More detailed content will be available soon with comprehensive explanations, eq
       });    }
   }, [params?.id, expandingNodes, getNodes, nodeDescriptions, handleToggleReadStatus, handleNodeClick, setNodes, setEdges, setCenter, getZoom]);
 
+  // Debug drag events
+  const dragCounter = useRef(0);
+  const handleNodeDragStart = useCallback((event: any, node: Node) => {
+    isDragging.current = true;
+    dragCounter.current = 0;
+    console.log('✅ Drag started for node:', node.id, 'at position:', node.position.x.toFixed(2), node.position.y.toFixed(2));
+  }, []);
+
+  const handleNodeDrag = useCallback((event: any, node: Node) => {
+    // Only log every 10th drag event to reduce console overhead
+    dragCounter.current++;
+    if (dragCounter.current % 10 === 0) {
+      console.log('🔄 Dragging node:', node.id, 'to position:', node.position.x.toFixed(2), node.position.y.toFixed(2));
+    }
+  }, []);
+
+  const handleNodeDragStop = useCallback((event: any, node: Node) => {
+    isDragging.current = false;
+    console.log('🛑 Drag stopped for node:', node.id, 'final position:', node.position.x.toFixed(2), node.position.y.toFixed(2));
+  }, []);
+
+  // Track if any node is currently being dragged
+  const isDragging = React.useRef(false);
+
   // Attach handlers to nodes - runs after handleExpandNode is defined
   useEffect(() => {
+    // Don't update nodes while dragging to prevent position resets
+    if (isDragging.current) return;
+    
     setNodes((nds) =>
-      nds.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          onToggleReadStatus: handleToggleReadStatus,
-          onNodeClick: handleNodeClick,
-          onExpandNode: node.data.canExpand ? handleExpandNode : undefined,
-          isSelected: selectedNode === node.id,
-        },
-      }))
+      nds.map((node) => {
+        // Only update if isSelected actually changed
+        if ((selectedNode === node.id) !== node.data.isSelected) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              onToggleReadStatus: handleToggleReadStatus,
+              onNodeClick: handleNodeClick,
+              onExpandNode: node.data.canExpand ? handleExpandNode : undefined,
+              isSelected: selectedNode === node.id,
+            },
+          };
+        }
+        return node;
+      })
     );
-  }, [selectedNode]); // Only update when selection changes
+  }, [selectedNode, handleToggleReadStatus, handleNodeClick, handleExpandNode, setNodes]); // Only update when selection changes
 
   // Handle edge connections
   const onConnect = useCallback(
     (connection: Connection) => {
       setEdges(eds => addEdge({
         ...connection,
-        type: 'bezier',
+        type: 'default',
         animated: false,
         style: { 
-          stroke: '#333', 
-          strokeWidth: 1,
-        },        markerEnd: undefined, // Remove endpoint markers
-        markerStart: undefined, // Remove startpoint markers
-        data: { curvature: 0.25 }
+          stroke: '#888', 
+          strokeWidth: 1.5,
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 12,
+          height: 12,
+          color: '#888',
+        },
       }, eds));
     },
     [setEdges]
-  );  // Sync expanded topics state (but don't update all nodes during drag)
+  );
+  
+  // Sync read status to nodes when topicsReadStatus changes
   useEffect(() => {
+    // Don't update nodes while dragging to prevent position resets
+    if (isDragging.current) return;
+    
+    setNodes(nds => nds.map(node => {
+      const nodeData = node.data as CustomNodeData;
+      const currentReadStatus = topicsReadStatus[node.id];
+      
+      // Only update if read status actually changed
+      if (currentReadStatus !== undefined && currentReadStatus !== nodeData.isRead) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isRead: currentReadStatus
+          }
+        };
+      }
+      
+      return node;
+    }));
+  }, [topicsReadStatus, setNodes]);
+  
+  // Sync loading quiz state to nodes
+  useEffect(() => {
+    // Don't update nodes while dragging to prevent position resets
+    if (isDragging.current) return;
+    
+    setNodes(nds => nds.map(node => {
+      const nodeData = node.data as CustomNodeData;
+      const isCurrentlyLoadingQuiz = loadingQuiz && pendingReadNode === node.id;
+      
+      // Only update if loading state actually changed
+      if (isCurrentlyLoadingQuiz !== nodeData.isLoadingQuiz) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isLoadingQuiz: isCurrentlyLoadingQuiz
+          }
+        };
+      }
+      
+      return node;
+    }));
+  }, [loadingQuiz, pendingReadNode, setNodes]);
+  
+  // Sync expanded topics state (but don't update all nodes during drag)
+  useEffect(() => {
+    // Don't update nodes while dragging to prevent position resets
+    if (isDragging.current) return;
+    
     setNodes(nds => nds.map(node => {
       const nodeData = node.data as CustomNodeData;
       let hasChanges = false;
@@ -2180,7 +2397,7 @@ More detailed content will be available soon with comprehensive explanations, eq
       
       return node;
     }));
-  }, [expandedTopics]); // Only when expansion changes, not selection
+  }, [expandedTopics, setNodes]); // Only when expansion changes, not selection
   
   const handleSignOut = async () => {
     try {
@@ -2276,6 +2493,9 @@ More detailed content will be available soon with comprehensive explanations, eq
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onNodeDragStart={handleNodeDragStart}
+              onNodeDrag={handleNodeDrag}
+              onNodeDragStop={handleNodeDragStop}
               fitView
               nodeTypes={nodeTypes}
               className="bg-black"
@@ -2291,6 +2511,17 @@ More detailed content will be available soon with comprehensive explanations, eq
               selectionKeyCode="Shift"
               multiSelectionKeyCode="Meta"
               defaultEdgeOptions={defaultEdgeOptions}
+              autoPanOnNodeDrag={false}
+              autoPanOnConnect={true}
+              elevateEdgesOnSelect={true}
+              proOptions={{ hideAttribution: true }}
+              edgesFocusable={false}
+              nodeOrigin={[0.5, 0.5]}
+              noDragClassName="nodrag"
+              nodeDragThreshold={0}
+              selectNodesOnDrag={false}
+              onlyRenderVisibleElements={false}
+              elevateNodesOnSelect={false}
             >
               <Controls className="bg-neutral-800 text-white border-neutral-700" />
               <Background color="#333" gap={16} size={1} />
