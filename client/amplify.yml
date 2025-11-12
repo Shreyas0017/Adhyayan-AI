@@ -3,9 +3,24 @@ applications:
   - frontend:
       build:
         commands:
-          - cd client
+          - echo "=== START BUILD DIAGNOSTIC ==="
+          - echo "Current working dir (before cd): $(pwd)"
+          - echo "Root repo listing:"
+          - ls -la
+          - echo "Switching to client folder..."
+          - cd client || (echo "client folder not found"; exit 1)
+          - echo "Current working dir (after cd): $(pwd)"
+          - echo "client listing:"
+          - ls -la
+          - echo "Install deps"
           - npm ci
+          - echo "Run build"
           - npm run build
+          - echo "Listing after build (should show .next):"
+          - ls -la
+          - echo "Listing client/.next:"
+          - ls -la client/.next || ls -la .next || echo ".next not found"
+          - echo "=== END BUILD DIAGNOSTIC ==="
       artifacts:
         baseDirectory: client/.next
         files:
