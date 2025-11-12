@@ -1,17 +1,15 @@
 version: 1
 applications:
   - frontend:
-      # If your Next app lives in a subfolder (e.g. "client"), set the root to that folder
-      # Otherwise Amplify detects automatically
       build:
         commands:
+          - cd client
           - npm ci
           - npm run build
       artifacts:
-        # For Next.js SSR Amplify needs the .next output
-        baseDirectory: .next
+        baseDirectory: client/.next
         files:
           - '**/*'
       cache:
         paths:
-          - node_modules/**/*
+          - client/node_modules/**/*
